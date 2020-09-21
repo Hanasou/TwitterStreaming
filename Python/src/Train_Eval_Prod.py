@@ -6,6 +6,7 @@ import os
 import torch
 import torch.nn as nn
 from torchtext import data
+import boto3
 
 from Model import LstmModel
 
@@ -14,7 +15,6 @@ def train(epochs, model, iterator, criterion, optimizer):
     if model.use_gpu:
         model.cuda()
     start_time = time.time()
-    print("Train Start")
     for i in range(epochs):
         for batch in iterator:
             # Reset gradient
@@ -42,8 +42,10 @@ def train(epochs, model, iterator, criterion, optimizer):
     duration = time.time() - start_time
     print(f'Train Duration: {duration:.0f}')
     # Save model
-    with open(os.path.join(args.model_dir, 'sent140.pth'), 'wb') as f:
+    model_name = 'sent140.pth'
+    with open('sent140.pth', 'wb') as f:
         torch.save(model.state_dict(), f)
+    s3_resource.Object(args.bucket_name, model_name).upload_file(Filename=model_name)
 
 # Evaluate
 def evaluate(model, iterator, criterion):
@@ -51,7 +53,7 @@ def evaluate(model, iterator, criterion):
     with torch.no_grad():
         for batch in iterator:
             text, text_lengths = batch.text
-            labels = batch.labels.squeeze()
+            labels = batch.label.squeeze()
             if model.use_gpu:
                 text, text_lengths = text.cuda(), text_lengths.cuda()
                 labels = labels.cuda()
@@ -71,17 +73,11 @@ def run_train(is_gpu):
     else:
         train(cpu_epochs, model, train_iterator, criterion, optimizer)
 
-def model_fn(model_dir):
-    model = LstmModel()
-    with open(os.path.join(model_dir, 'model.pt'), 'rb') as f:
-        model.load_state_dict(torch.load(f))
-    return model
-
 if __name__ =='__main__':
     parser = argparse.ArgumentParser()
 
     # Pass in hyperparams as arguments for production
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--emb_dim', type=int, default=50)
     parser.add_argument('--hidden_dim', type=int, default=50)
     parser.add_argument('--num_classes', type=int, default=50)
@@ -90,16 +86,15 @@ if __name__ =='__main__':
     parser.add_argument('--num_hidden', type=int, default=256)
     parser.add_argument('--batch_size', type=int, default=100)
     parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--use_cuda', type=bool, default=True)
 
-    # Data, model, and output directories
-    parser.add_argument('--output_data_dir', type=str, default=os.environ['SM_OUTPUT_DATA_DIR'])
-    parser.add_argument('--model_dir', type=str, default=os.environ['SM_MODEL_DIR'])
-    parser.add_argument('--train', type=str, default=os.environ['SM_CHANNEL_TRAIN'])
-
+    # Bucket and file names
+    parser.add_argument('--bucket_name', type=str, default=os.environ['BUCKET_NAME'])
+    parser.add_argument('--train_key', type=str, default=os.environ['TRAIN_FILE'])
+    
     args, _ = parser.parse_known_args()
 
     # Hyperparameters
+    print("Hyperparameters init")
     lr = args.lr
     batch_size = args.batch_size
     cpu_epochs = 1
@@ -111,8 +106,14 @@ if __name__ =='__main__':
     lstm_units = args.lstm_units
     num_hidden = args.num_hidden
 
+    # Initialize boto3
+    s3_resource = boto3.resource('s3')
+    train_object = s3_resource.Object(bucket_name=args.bucket_name, key=args.train_key)
+    train_object.download_file('train.csv')
+    
     # Check if we're using cuda
     is_gpu = torch.cuda.is_available()
+    print("Using gpu", is_gpu)
 
     # init tokenizer
     tokenizer = lambda s: s.split()
@@ -120,24 +121,38 @@ if __name__ =='__main__':
     # init text and label fields
     # Label is just a single number so no sequence, vocabulary, or padding
     # Data should already have been preprocessed in some other notebook
+    print("Initializing fields")
+    s3_resource = boto3.resource('s3')
+    train_object = s3_resource.Object(bucket_name=args.bucket_name, key=args.train_key)
+    print("Downloading file")
+    train_object.download_file('train.csv')
     text_field = data.Field(tokenize=tokenizer, include_lengths=True, batch_first=True)
     label_field = data.Field(sequential=False, use_vocab=False, pad_token=None, unk_token=None)
 
     # Initialize a TabularDataset
     # Create a TabularDataset with path to our csv file
     # Call split on it
+    print("Initializing dataset")
     fields = [('label', label_field), ('text', text_field)]
-    all_data = data.TabularDataset(path=args.train, format='CSV', skip_header=True, fields=fields)
+    all_data = data.TabularDataset(path='train.csv', format='CSV', skip_header=True, fields=fields)
 
     train_data, test_data = all_data.split(split_ratio=0.7)
 
     # Build the vocabulary
     # Access them with text_field.vocab and label_field.vocab
+    print("Building vocab")
     text_field.build_vocab(train_data)
-    with open(os.path.join(args.model_dir, 'vocab.json'), 'w') as fp:
-        json.dump(text_field.vocab, fp)
+    vocab = text_field.vocab
+    vocab_stoi = 'vocab_stoi.json'
+    vocab_itos = 'vocab_itos.json'
+    with open(vocab_stoi, 'w') as fp:
+        json.dump(text_field.vocab.stoi, fp)
+    with open(vocab_itos, 'w') as fp:
+        json.dump(text_field.vocab.itos, fp)
     label_field.build_vocab(train_data)
-
+    # Upload to s3
+    s3_resource.Object(args.bucket_name, vocab_stoi).upload_file(Filename=vocab_stoi)
+    s3_resource.Object(args.bucket_name, vocab_itos).upload_file(Filename=vocab_stoi)
     # Initialize device
     device = torch.device('cuda' if is_gpu else 'cpu')
     
@@ -146,6 +161,7 @@ if __name__ =='__main__':
     # Each batch contains a tuple
     # The first is 100 batches of padded vectors
     # The second one contains the length of each example in the batch
+    print("Building iterators")
     train_iterator, test_iterator = data.BucketIterator.splits(
         (train_data, test_data),
         batch_size=batch_size,
@@ -154,10 +170,8 @@ if __name__ =='__main__':
         device=device
     )
 
-    # Initialize vocab
-    with open(os.path.join(args.model_dir, 'vocab.json'), 'r') as fp:
-        vocab = json.load(fp)
     # Initialize model
+    print("Initializing model")
     if is_gpu:
         model = LstmModel(vocab_size=len(vocab),
                     emb_dim=emb_dim,
@@ -168,15 +182,21 @@ if __name__ =='__main__':
                     use_gpu=True)
     else:
         model = LstmModel(vocab_size=len(vocab),
-                        emb_dim=emb_dim,
-                        lstm_units=lstm_units,
-                        num_hidden=num_hidden,
-                        num_layers=num_layers,
-                        num_classes=num_classes)
+                    emb_dim=emb_dim,
+                    lstm_units=lstm_units,
+                    num_hidden=num_hidden,
+                    num_layers=num_layers,
+                    num_classes=num_classes)
 
     # Criterion and optimizer
+    print("Criterion and Optimizer")
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     # Train the model and save it
+    print("Train start")
     run_train(is_gpu)
+
+    # Evaluate model
+    print("Evaluation start")
+    evaluate(model, test_iterator, criterion)

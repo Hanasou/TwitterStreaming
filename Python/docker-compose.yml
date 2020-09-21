@@ -1,0 +1,8 @@
+version: '2'
+
+services:
+  server:
+    image: model-train-eval
+    build: .
+    env_file:
+      - env_vars.env
