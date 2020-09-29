@@ -1,5 +1,7 @@
 /Spark/twitter.txt
 /Spark/src/examples
+/Kafka/Producer/twitter.txt
+/Kafka/Producer/src/main/java/examples
 /Python/training.1600000.processed.noemoticon.csv
 /Python/training_processed_3.csv
 /Python/training_processed_3_short.csv
