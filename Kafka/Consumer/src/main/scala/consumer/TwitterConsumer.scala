@@ -2,6 +2,7 @@ package consumer
 
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
+import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
@@ -42,12 +43,15 @@ object TwitterConsumer {
 
   def run(): Unit = {
     // Initialize streaming context
-    val ssc = new StreamingContext("local[*]", "TwitterConsumer", Seconds(1))
+    print("Creating streaming context")
+    val conf = new SparkConf().setMaster("local[*]").setAppName("TwitterConsumer")
+    val ssc = new StreamingContext(conf, Seconds(1))
 
     val bootstrapServers = "localhost:9092"
     val groupId = "twitter_group"
     val topic = "twitter_topic"
 
+    print("Streaming data from Kafka")
     val tweetStream = createStream(ssc, bootstrapServers, groupId, topic)
     val keysAndValues = tweetStream.map(record => (record.key, record.value))
     keysAndValues.print()

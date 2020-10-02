@@ -95,16 +95,19 @@ public class TwitterProducer {
         return builder.build();
     }
 
-    private void run() {
+    private static void run() {
         // Set up message queue
         BlockingQueue<String> msgQueue = new LinkedBlockingQueue<String>(1000);
 
         // Client
+        logger.info("Starting Twitter Client");
         Client hosebirdClient = createTwitterClient(msgQueue);
         // Producer
+        logger.info("Starting Kafka Producer");
         KafkaProducer<String, String> producer = createProducer();
 
         // Connect
+        logger.info("Connecting Client");
         hosebirdClient.connect();
 
         // Add shutdown hook
@@ -113,6 +116,7 @@ public class TwitterProducer {
             hosebirdClient.stop();
             producer.close();
         }));
+
         // on a different thread, or multiple different threads....
         while (!hosebirdClient.isDone()) {
             String msg = null;
@@ -124,10 +128,14 @@ public class TwitterProducer {
             }
             if (msg != null) {
                 logger.info(msg);
-                ProducerRecord<String, String> record = new ProducerRecord<String, String>(TOPIC, msg);
+                ProducerRecord<String, String> record = new ProducerRecord<String, String>(TOPIC, null, msg);
                 producer.send(record);
             }
         }
         hosebirdClient.stop();
+    }
+
+    public static void main(String[] args) {
+        run();
     }
 }

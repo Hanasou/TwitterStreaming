@@ -8,7 +8,7 @@ import torch.nn as nn
 from torchtext import data
 import boto3
 
-from Model import LstmModel
+from model import LstmModel
 
 # Trains and saves model
 def train(epochs, model, iterator, criterion, optimizer):
@@ -80,7 +80,7 @@ if __name__ =='__main__':
     parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--emb_dim', type=int, default=50)
     parser.add_argument('--hidden_dim', type=int, default=50)
-    parser.add_argument('--num_classes', type=int, default=50)
+    parser.add_argument('--num_classes', type=int, default=3)
     parser.add_argument('--num_layers', type=int, default=3)
     parser.add_argument('--lstm_units', type=int, default=128)
     parser.add_argument('--num_hidden', type=int, default=256)

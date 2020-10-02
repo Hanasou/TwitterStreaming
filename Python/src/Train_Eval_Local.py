@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torchtext import data
 
-from Model import LstmModel
+from model import LstmModel
 
 # Check if we're using cuda
 is_gpu = torch.cuda.is_available()

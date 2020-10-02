@@ -1,0 +1,1 @@
+["sbt.Task[scala.collection.immutable.Map[java.lang.String, scala.collection.Seq[scala.Tuple2[java.nio.file.Path, sbt.nio.FileStamp]]]]",{"2.12.12":{"hashes":[["C:\\Users\\royzh\\Documents\\Projects\\TwitterApp\\Kafka\\Consumer\\src\\main\\scala\\consumer\\TwitterConsumer.scala","3cd385a7047132c351a3d0d6d3c1b89141eefd5f"]],"lastModifiedTimes":[]}}]
