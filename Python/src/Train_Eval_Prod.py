@@ -8,7 +8,7 @@ import torch.nn as nn
 from torchtext import data
 import boto3
 
-from model import LstmModel
+from Model import LstmModel
 
 # Trains and saves model
 def train(epochs, model, iterator, criterion, optimizer):

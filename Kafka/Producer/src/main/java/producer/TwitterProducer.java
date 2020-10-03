@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 public class TwitterProducer {
     private static Logger logger = LoggerFactory.getLogger(TwitterProducer.class.getName());
     private static final String BOOTSTRAP_SERVERS = "localhost:9092";
-    private static final String TOPIC = "twitter_topic";
+    private static final String TOPIC = "twitter_topic_2";
 
     private static Map<String, String> getTwitterCredentials(String path) {
         Map<String, String> creds = new HashMap<String, String>();
@@ -59,7 +59,7 @@ public class TwitterProducer {
         properties.setProperty(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
 
         // High throughput settings
-        properties.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
+        properties.setProperty(ProducerConfig.COMPRESSION_TYPE_CONFIG, "gzip");
         properties.setProperty(ProducerConfig.LINGER_MS_CONFIG, "20");
         properties.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32 * 1024));
 
@@ -78,10 +78,8 @@ public class TwitterProducer {
         StatusesFilterEndpoint hosebirdEndpoint = new StatusesFilterEndpoint();
 
         // Uncomment if I want to track terms and followers
-        // List<Long> followings = Lists.newArrayList(1234L, 566788L);
-        // List<String> terms = Lists.newArrayList("twitter", "api");
-        // hosebirdEndpoint.followings(followings);
-        // hosebirdEndpoint.trackTerms(terms);
+        List<String> terms = Lists.newArrayList("esports");
+        hosebirdEndpoint.trackTerms(terms);
 
         // Authenticate
         Authentication hosebirdAuth = new OAuth1(consumerKey, consumerSecret, accessToken, accessTokenSecret);
@@ -128,7 +126,7 @@ public class TwitterProducer {
             }
             if (msg != null) {
                 logger.info(msg);
-                ProducerRecord<String, String> record = new ProducerRecord<String, String>(TOPIC, null, msg);
+                ProducerRecord<String, String> record = new ProducerRecord<String, String>(TOPIC, msg);
                 producer.send(record);
             }
         }

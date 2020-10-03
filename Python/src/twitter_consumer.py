@@ -8,7 +8,7 @@ from torchtext import data
 from torchtext import vocab
 import boto3
 
-from model import LstmModel
+from Model import LstmModel
 
 def get_vocab_counter():
     with open("../data/vocab_stoi.json", "r") as fp:
@@ -62,17 +62,18 @@ def init_model(vocab_length):
     model.eval()
     return model
 
-def evaluate(model, data):
+def evaluate(model, data, field):
     model.eval()
     with torch.no_grad():
         data = process_string(data)
-        data = encode_string(data)
+        data = encode_string(data, field)
 
         msg, msg_lengths = data
+        msg_lengths = torch.sort(msg_lengths, descending=True)[0]
         pred = model(msg, msg_lengths)
-    return pred
+    return pred.argmax().item()
 
-topic = "twitter_topic"
+topic = "twitter_topic_2"
 group_id = "twitter_group"
 bootstrap_servers = ["localhost:9092"]
 json_deserializer = lambda m: json.loads(m.decode("utf-8"))
@@ -84,25 +85,40 @@ def create_consumer(topic, group_id, bootstrap_servers, deserializer):
                             group_id=group_id, 
                             bootstrap_servers=bootstrap_servers, 
                             value_deserializer=deserializer,
-                            auto_offset_reset='latest')
+                            auto_offset_reset='latest',
+                            enable_auto_commit=False)
     return consumer
 
 def run():
+    print("Starting Consumer")
     consumer = create_consumer(topic, group_id, bootstrap_servers, string_deserializer)
-
-    for msg in consumer:
-        val = msg.value
-        print(val)
+    print("Polling")
+    try:
+        while True:
+            msg_pack = consumer.poll(100)
+            for tp, messages in msg_pack.items():
+                record_count = len(messages)
+                for msg in messages:
+                    val = msg.value
+                    # pred = run_evaluation(val)
+                    print(val)
+                if record_count > 0:
+                    consumer.commit()
+    except KeyboardInterrupt:
+        print("Shutting down")
+    finally:
+        print("Closing consumer")
+        consumer.close()
 
 def run_evaluation(message):
     vocab_counter = get_vocab_counter()
     text_field = configure_field(vocab_counter)
     sample_text = message
     model = init_model(len(vocab_counter))
-    prediction = evaluate(model, sample_text)
+    prediction = evaluate(model, sample_text, text_field)
     return prediction
 
 if __name__ == '__main__':
-    sample_text = "that's some spicy sample text"
-    print(run_evaluation(sample_text))
+    run()
+    
     
