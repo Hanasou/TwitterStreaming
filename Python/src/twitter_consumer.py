@@ -6,6 +6,9 @@ import torch
 from kafka import KafkaConsumer
 from torchtext import data
 from torchtext import vocab
+from pymongo import MongoClient
+from pymongo import errors
+from bson.objectid import ObjectId
 import boto3
 
 from Model import LstmModel
@@ -23,28 +26,36 @@ def configure_field(vocab_counter):
     text_field.vocab = vocab.Vocab(vocab_counter)
     return text_field
 
-def encode_string(text, field):
-    # Preprocess the text (I don't think this does anything right now)
-    text = field.preprocess(text)
-    # Return a processed version of the text
-    return field.process(text)
-
 def process_string(msg):
-    """
-    Deserialize the message polled from kafka
-    """
     # Convert the message to a string
     msg = str(msg)
-    # The first element is going to be 'b' so just slice that off
-    msg = msg[1:]
     # Make everything lowercase
     msg = msg.lower()
     # Remove all punctuation
     msg = "".join([ch for ch in msg if ch not in punctuation])
     return msg
 
-def process_json(json):
-    pass
+def encode_string(text, field):
+    encoded_list = []
+    for word in text.split():
+        encoded_list.append(field.vocab.stoi[word])
+    encoded = torch.LongTensor(encoded_list)
+    length = torch.LongTensor([len(encoded_list)])
+    reshaped = torch.reshape(encoded, (1,-1))
+    return reshaped, length
+
+def encode_string_old(text, field):
+    # Preprocess the text (I don't think this does anything right now)
+    text = field.preprocess(text)
+    # Return a processed version of the text
+    return field.process(text)
+
+def process_json(message):
+    message_dict = json.loads(message.decode("utf-8"))
+    val_dict = dict()
+    val_dict["id_str"] = message_dict["id_str"]
+    val_dict["text"] = message_dict["text"]
+    return val_dict
 
 def init_model(vocab_length):
     if torch.cuda.is_available() == False:
@@ -57,7 +68,7 @@ def init_model(vocab_length):
                     num_hidden=256,
                     num_layers=3,
                     num_classes=3,
-                    use_gpu=False)
+                    use_gpu=torch.cuda.is_available())
     model.load_state_dict(torch.load("../data/sent140.pth", map_location=device))
     model.eval()
     return model
@@ -73,10 +84,10 @@ def evaluate(model, data, field):
         pred = model(msg, msg_lengths)
     return pred.argmax().item()
 
-topic = "twitter_topic_2"
-group_id = "twitter_group"
+topic = "twitter_topic_3"
+group_id = "twitter_group_2"
 bootstrap_servers = ["localhost:9092"]
-json_deserializer = lambda m: json.loads(m.decode("utf-8"))
+json_deserializer = process_json
 string_deserializer = process_string
 tokenizer = lambda s: s.split()
 
@@ -89,21 +100,82 @@ def create_consumer(topic, group_id, bootstrap_servers, deserializer):
                             enable_auto_commit=False)
     return consumer
 
+def get_credentials():
+    credentials = {}
+    # Open file
+    with open("../data/dbcredentials.txt", "r") as creds:
+        lines = creds.readlines()
+    
+    # Read lines
+    for line in lines:
+        cred = line.split()
+        label = cred[0]
+        value = cred[1]
+        credentials[label] = value
+    
+    # Put into dictionary
+    return credentials
+
+def connect_client(creds):
+    username = creds["username"]
+    password = creds["password"]
+    dbname = creds["dbname"]
+    uri = "mongodb+srv://{}:{}@cluster0.zrbnr.mongodb.net/{}?retryWrites=true&w=majority".format(username, 
+        password, dbname)
+    client = MongoClient(uri)
+    db = client.twitter_app
+    return db
+
 def run():
     print("Starting Consumer")
-    consumer = create_consumer(topic, group_id, bootstrap_servers, string_deserializer)
+    consumer = create_consumer(topic, group_id, bootstrap_servers, json_deserializer)
     print("Polling")
+    # Initialize vocab, field, and model
+    vocab_counter = get_vocab_counter()
+    text_field = configure_field(vocab_counter)
+    model = init_model(len(vocab_counter))
+
+    # Initialize database
+    creds = get_credentials()
+    db = connect_client(creds)
+    collection = db.tweets
+
+    # ObjectId needs to be 24 hex characters and our tweet_id is only 19
+    # So append this to all of them 
+    suffix = '12345'
+
     try:
         while True:
-            msg_pack = consumer.poll(100)
-            for tp, messages in msg_pack.items():
-                record_count = len(messages)
-                for msg in messages:
-                    val = msg.value
-                    # pred = run_evaluation(val)
-                    print(val)
-                if record_count > 0:
-                    consumer.commit()
+            try:
+                msg_pack = consumer.poll(1000)
+                for tp, messages in msg_pack.items():
+                    record_count = len(messages)
+                    documents = []
+                    for msg in messages:
+                        try:
+                            # Unpack the message
+                            val = msg.value
+                            val_id = val["id_str"]
+                            val_text = val["text"]
+                            pred = evaluate(model, val_text, text_field)
+                            val_sent = pred
+
+                            # Append this document
+                            document = {
+                                '_id': ObjectId(val_id + suffix),
+                                'text': val_text,
+                                'sentiment': val_sent
+                            }
+                            documents.append(document)
+                            print(val_text, val_sent)
+                        except KeyError:
+                            print("Bad Data")
+                    if record_count > 0:
+                        # Insert the documents
+                        collection.insert_many(documents)
+                        consumer.commit()
+            except KeyError:
+                print("Bad data")
     except KeyboardInterrupt:
         print("Shutting down")
     finally:
@@ -113,9 +185,12 @@ def run():
 def run_evaluation(message):
     vocab_counter = get_vocab_counter()
     text_field = configure_field(vocab_counter)
-    sample_text = message
     model = init_model(len(vocab_counter))
-    prediction = evaluate(model, sample_text, text_field)
+    try:
+        prediction = evaluate(model, message, text_field)
+    except ValueError:
+        print("Bad input")
+        prediction = -1
     return prediction
 
 if __name__ == '__main__':

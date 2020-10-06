@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 public class TwitterProducer {
     private static Logger logger = LoggerFactory.getLogger(TwitterProducer.class.getName());
     private static final String BOOTSTRAP_SERVERS = "localhost:9092";
-    private static final String TOPIC = "twitter_topic_2";
+    private static final String TOPIC = "twitter_topic_3";
 
     private static Map<String, String> getTwitterCredentials(String path) {
         Map<String, String> creds = new HashMap<String, String>();
@@ -78,7 +78,7 @@ public class TwitterProducer {
         StatusesFilterEndpoint hosebirdEndpoint = new StatusesFilterEndpoint();
 
         // Uncomment if I want to track terms and followers
-        List<String> terms = Lists.newArrayList("esports");
+        List<String> terms = Lists.newArrayList("covid");
         hosebirdEndpoint.trackTerms(terms);
 
         // Authenticate
