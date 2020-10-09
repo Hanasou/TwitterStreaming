@@ -6,17 +6,24 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.log4j.{Level, Logger}
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.functions._
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
 import org.apache.spark.streaming.{Seconds, StreamingContext}
+import org.json4s.JsonAST.JValue
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 
 
 class TwitterConsumer extends Serializable{
+
+  val bootstrapServers = "localhost:9092"
+  val groupId = "twitter_group_2"
+  val topic = "twitter_topic_3"
 
   def createStream(ssc: StreamingContext, bootstrapServers: String, groupId: String, topic: String):
   InputDStream[ConsumerRecord[String, String]] = {
@@ -55,6 +62,13 @@ class TwitterConsumer extends Serializable{
     val jsonValue = parse(value)
     implicit val formats = DefaultFormats
     val msg = jsonValue.extract[Message]
+    msg
+  }
+
+  def parseJson(x: Row): Message = {
+    val jsonVal = parse(x.getString(0))
+    implicit val formats = DefaultFormats
+    val msg = jsonVal.extract[Message]
     msg
   }
 
@@ -113,6 +127,38 @@ class TwitterConsumer extends Serializable{
     sorted
   }
 
+  def runStructuredStream(): Unit = {
+    // Initialize spark session
+    val spark = SparkSession
+      .builder
+      .appName("TwitterStreamConsumer")
+      .master("local[*]") // use all cores in cpu
+      .config("spark.sql.streaming.checkpointLocation", "file:///C:/checkpoint")
+      // according to the guide, I should set checkpoint when I write the stream instead
+      .getOrCreate()
+
+    // Get rid of log spam
+    val rootLogger = Logger.getRootLogger()
+    rootLogger.setLevel(Level.ERROR)
+
+    // Get raw data
+    val data = spark
+      .readStream
+      .format("kafka")
+      .option("kafka.bootstrap.servers", bootstrapServers)
+      .option("subscribe", topic)
+      .load()
+
+    val query = data.writeStream
+      .outputMode("complete")
+      .format("console")
+      .start()
+
+    query.awaitTermination()
+
+    spark.stop()
+  }
+
 
   def run(): Unit = {
     // Initialize streaming context
@@ -124,9 +170,7 @@ class TwitterConsumer extends Serializable{
     val rootLogger = Logger.getRootLogger()
     rootLogger.setLevel(Level.ERROR)
 
-    val bootstrapServers = "localhost:9092"
-    val groupId = "twitter_group_2"
-    val topic = "twitter_topic_3"
+
 
     println("Streaming data from Kafka")
     val tweetStream = createStream(ssc, bootstrapServers, groupId, topic)
@@ -150,4 +194,5 @@ class TwitterConsumer extends Serializable{
     ssc.start()
     ssc.awaitTermination()
   }
+
 }
